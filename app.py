@@ -29,12 +29,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Data Loading & Preprocessing
+# Data Loading & Column Normalization
 # ---------------------------------------------------------
 @st.cache_data
 def load_data():
     df = pd.read_csv('eBay.csv')
-    df.columns = df.columns.str.strip()
+    # Clean column headers (remove spaces, carriage returns, etc.)
+    df.columns = df.columns.str.strip().str.replace('\r', '').str.replace('\n', '')
     return df
 
 try:
@@ -43,30 +44,43 @@ except Exception as e:
     st.error(f"Error loading dataset `eBay.csv`: {e}")
     st.stop()
 
+# Helper function to find matching column name flexibly
+def get_col(df, possible_names):
+    for name in possible_names:
+        for col in df.columns:
+            if name.lower() == col.lower().strip():
+                return col
+    return None
+
+col_gender = get_col(df, ['Gender', 'gender'])
+col_age = get_col(df, ['Age', 'age', 'Age Group'])
+col_freq = get_col(df, ['Purchasing_ Frequency', 'Purchasing Frequency', 'Purchasing_Frequency'])
+col_rec = get_col(df, ['Personalized_ Recommendation_ Frequency', 'Personalized Recommendation Frequency', 'Personalized_Recommendation_Frequency'])
+col_abandon = get_col(df, ['Reason_for_abandoning', 'Reason for abandoning', 'Reason_for_abandoning_cart'])
+col_search = get_col(df, ['Search_Accuracy', 'Search Accuracy'])
+col_payment = get_col(df, ['Payement_Method', 'Payment_Method', 'Payment Method'])
+
 # Sidebar Filters
 st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/1/1b/EBay_logo.svg", width=140)
 st.sidebar.title("Executive Control Panel")
-
 st.sidebar.subheader("Filter Data")
 
-# Safely handle missing values in Gender column
-available_genders = df['Gender'].dropna().unique().tolist() if 'Gender' in df.columns else []
-
-gender_filter = st.sidebar.multiselect(
-    "Select Gender:",
-    options=available_genders,
-    default=available_genders
-)
-
-# Apply Filter Safely
-if gender_filter and 'Gender' in df.columns:
-    filtered_df = df[df['Gender'].isin(gender_filter)].copy()
+if col_gender:
+    available_genders = df[col_gender].dropna().unique().tolist()
+    gender_filter = st.sidebar.multiselect(
+        "Select Gender:",
+        options=available_genders,
+        default=available_genders
+    )
+    if gender_filter:
+        filtered_df = df[df[col_gender].isin(gender_filter)].copy()
+    else:
+        filtered_df = df.copy()
 else:
     filtered_df = df.copy()
 
-# Guard Against Empty Filter Selection
 if filtered_df.empty:
-    st.warning("⚠️ No data matches the selected filters. Please select at least one Gender option in the sidebar.")
+    st.warning("⚠️ No data available for the selected filters. Please adjust sidebar filters.")
     st.stop()
 
 # ---------------------------------------------------------
@@ -97,10 +111,10 @@ with tab1:
     with col1:
         st.metric(label="Total Surveyed Buyers", value=f"{len(filtered_df):,}")
     with col2:
-        top_freq = filtered_df['Purchasing_ Frequency'].mode()[0] if ('Purchasing_ Frequency' in filtered_df and not filtered_df['Purchasing_ Frequency'].mode().empty) else "N/A"
+        top_freq = filtered_df[col_freq].mode()[0] if (col_freq and not filtered_df[col_freq].mode().empty) else "N/A"
         st.metric(label="Primary Buying Frequency", value=str(top_freq))
     with col3:
-        top_rec = filtered_df['Personalized_ Recommendation_ Frequency'].mode()[0] if ('Personalized_ Recommendation_ Frequency' in filtered_df and not filtered_df['Personalized_ Recommendation_ Frequency'].mode().empty) else "N/A"
+        top_rec = filtered_df[col_rec].mode()[0] if (col_rec and not filtered_df[col_rec].mode().empty) else "N/A"
         st.metric(label="Top Rec. Engagement", value=str(top_rec))
     with col4:
         st.metric(label="Data Integrity Score", value="99.4%", delta="Cleaned")
@@ -111,21 +125,29 @@ with tab1:
     
     with col_left:
         st.markdown("### Demographic Distribution")
-        if 'Age' in filtered_df.columns and 'Gender' in filtered_df.columns:
+        if col_age and col_gender:
             fig_age = px.histogram(
-                filtered_df, x='Age', color='Gender', 
+                filtered_df, x=col_age, color=col_gender, 
                 barmode='group', title="Age Distribution by Gender",
                 color_discrete_sequence=['#0064D2', '#FF4136', '#2ECC40']
             )
             fig_age.update_layout(template="plotly_white")
             st.plotly_chart(fig_age, use_container_width=True)
+        elif col_age:
+            fig_age = px.histogram(
+                filtered_df, x=col_age, 
+                title="Age Distribution",
+                color_discrete_sequence=['#0064D2']
+            )
+            fig_age.update_layout(template="plotly_white")
+            st.plotly_chart(fig_age, use_container_width=True)
         else:
-            st.info("Age/Gender column not found for demographic plot.")
+            st.info("Age column not found in dataset.")
             
     with col_right:
         st.markdown("### Purchasing Frequency Breakdown")
-        if 'Purchasing_ Frequency' in filtered_df.columns:
-            freq_counts = filtered_df['Purchasing_ Frequency'].value_counts().reset_index()
+        if col_freq:
+            freq_counts = filtered_df[col_freq].value_counts().reset_index()
             freq_counts.columns = ['Frequency', 'Count']
             fig_freq = px.pie(
                 freq_counts, values='Count', names='Frequency', 
@@ -134,6 +156,8 @@ with tab1:
             )
             fig_freq.update_layout(template="plotly_white")
             st.plotly_chart(fig_freq, use_container_width=True)
+        else:
+            st.info("Purchasing Frequency column not found in dataset.")
 
 # ---------------------------------------------------------
 # Tab 2: Friction & Abandonment Analysis
@@ -142,8 +166,8 @@ with tab2:
     st.subheader("Cart Abandonment Root-Cause Analysis")
     st.markdown("Identifying critical friction points causing revenue leakage in the conversion funnel.")
     
-    if 'Reason_for_abandoning' in filtered_df.columns:
-        abandon_data = filtered_df['Reason_for_abandoning'].value_counts().reset_index()
+    if col_abandon:
+        abandon_data = filtered_df[col_abandon].value_counts().reset_index()
         abandon_data.columns = ['Reason', 'Count']
         
         fig_abandon = px.bar(
@@ -157,20 +181,20 @@ with tab2:
     col_f1, col_f2 = st.columns(2)
     
     with col_f1:
-        if 'Search_Accuracy' in filtered_df.columns and 'Age' in filtered_df.columns:
+        if col_search and col_age:
             st.markdown("### Search Accuracy vs. Age")
             fig_search = px.box(
-                filtered_df, x='Search_Accuracy', y='Age', 
-                color='Search_Accuracy', title="Search Accuracy Perceived Across Age Groups",
+                filtered_df, x=col_search, y=col_age, 
+                color=col_search, title="Search Accuracy Perceived Across Age Groups",
                 color_discrete_sequence=px.colors.qualitative.Pastel
             )
             fig_search.update_layout(template="plotly_white")
             st.plotly_chart(fig_search, use_container_width=True)
 
     with col_f2:
-        if 'Payement_Method' in filtered_df.columns:
+        if col_payment:
             st.markdown("### Preferred Payment Methods")
-            pay_counts = filtered_df['Payement_Method'].value_counts().reset_index()
+            pay_counts = filtered_df[col_payment].value_counts().reset_index()
             pay_counts.columns = ['Payment Method', 'Count']
             fig_pay = px.bar(
                 pay_counts, x='Payment Method', y='Count',
@@ -187,7 +211,9 @@ with tab3:
     st.subheader("Unsupervised Learning: K-Means Customer Clustering")
     st.markdown("Segmenting customers based on behavior metrics to enable hyper-personalized marketing.")
 
-    num_cols = filtered_df.select_dtypes(include=[np.number]).columns.tolist()
+    # Select numeric features safely
+    num_df = filtered_df.select_dtypes(include=[np.number]).copy()
+    num_cols = num_df.columns.tolist()
     
     if len(num_cols) >= 2:
         col_m1, col_m2 = st.columns([1, 3])
@@ -203,48 +229,50 @@ with tab3:
             
         with col_m2:
             if len(selected_features) >= 2:
-                # Remove rows with NaN in selected features
-                cluster_df = filtered_df[selected_features].dropna()
+                # Drop rows with NaNs in selected columns
+                cluster_df = num_df[selected_features].dropna()
                 
-                # Deduplicate columns if any duplicate names exist
+                # Deduplicate columns if any
                 cluster_df = cluster_df.loc[:, ~cluster_df.columns.duplicated()]
                 
-                if len(cluster_df) >= k_clusters:
-                    scaler = StandardScaler()
-                    scaled_data = scaler.fit_transform(cluster_df)
-                    
-                    kmeans = KMeans(n_clusters=k_clusters, random_state=42, n_init=10)
-                    cluster_labels = kmeans.fit_predict(scaled_data)
-                    
-                    # Create result DataFrame
-                    plot_df = cluster_df.copy()
-                    plot_df['Cluster'] = [f"Cluster {i+1}" for i in cluster_labels]
-                    
-                    if len(selected_features) >= 3:
-                        fig_cluster = px.scatter_3d(
-                            plot_df, x=selected_features[0], y=selected_features[1], z=selected_features[2],
-                            color='Cluster', title=f"3D K-Means Clustering Visual (k={k_clusters})",
-                            color_discrete_sequence=px.colors.qualitative.Bold
-                        )
-                    else:
-                        fig_cluster = px.scatter(
-                            plot_df, x=selected_features[0], y=selected_features[1],
-                            color='Cluster', title=f"2D K-Means Clustering Visual (k={k_clusters})",
-                            color_discrete_sequence=px.colors.qualitative.Bold
-                        )
+                if len(cluster_df) >= k_clusters and not cluster_df.empty:
+                    try:
+                        scaler = StandardScaler()
+                        scaled_data = scaler.fit_transform(cluster_df)
                         
-                    fig_cluster.update_layout(template="plotly_white")
-                    st.plotly_chart(fig_cluster, use_container_width=True)
-                    
-                    st.markdown("#### Cluster Profiling & Center Averages")
-                    summary_df = plot_df.groupby('Cluster').mean().round(2)
-                    st.dataframe(summary_df.style.highlight_max(axis=0, color="#d1e7dd"), use_container_width=True)
+                        kmeans = KMeans(n_clusters=k_clusters, random_state=42, n_init=10)
+                        cluster_labels = kmeans.fit_predict(scaled_data)
+                        
+                        plot_df = cluster_df.copy()
+                        plot_df['Cluster'] = [f"Cluster {i+1}" for i in cluster_labels]
+                        
+                        if len(selected_features) >= 3:
+                            fig_cluster = px.scatter_3d(
+                                plot_df, x=selected_features[0], y=selected_features[1], z=selected_features[2],
+                                color='Cluster', title=f"3D K-Means Clustering Visual (k={k_clusters})",
+                                color_discrete_sequence=px.colors.qualitative.Bold
+                            )
+                        else:
+                            fig_cluster = px.scatter(
+                                plot_df, x=selected_features[0], y=selected_features[1],
+                                color='Cluster', title=f"2D K-Means Clustering Visual (k={k_clusters})",
+                                color_discrete_sequence=px.colors.qualitative.Bold
+                            )
+                            
+                        fig_cluster.update_layout(template="plotly_white")
+                        st.plotly_chart(fig_cluster, use_container_width=True)
+                        
+                        st.markdown("#### Cluster Profiling & Center Averages")
+                        summary_df = plot_df.groupby('Cluster').mean().round(2)
+                        st.dataframe(summary_df.style.highlight_max(axis=0, color="#d1e7dd"), use_container_width=True)
+                    except Exception as err:
+                        st.error(f"Clustering execution error: {err}")
                 else:
-                    st.warning("Not enough valid data points available for the selected cluster count.")
+                    st.warning("Not enough valid non-null rows to perform clustering on these features.")
             else:
                 st.warning("Please select at least 2 features for clustering analysis.")
     else:
-        st.info("Insufficient numeric features available for automated K-Means execution.")
+        st.info("Insufficient numeric features available in this dataset for K-Means clustering.")
 
 # ---------------------------------------------------------
 # Tab 4: Strategic Recommendations Roadmap
