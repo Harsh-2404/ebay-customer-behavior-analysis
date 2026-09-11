@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
@@ -72,7 +71,7 @@ st.markdown(
 
 
 # ==========================================
-# 2. SAFE DATA LOADING & DUPLICATE COLUMN CLEANUP
+# 2. SAFE DATA LOADING & CLEANUP
 # ==========================================
 @st.cache_data
 def load_data():
@@ -84,7 +83,7 @@ def load_data():
         df = pd.DataFrame(
             {
                 "age": np.random.choice(
-                    [18, 22, 28, 35, 42, 50, 61, 67], size=n
+                    [18, 22, 28, 35, 42, 50, 61, 67, 72, 78], size=n
                 ),
                 "Gender": np.random.choice(
                     ["Male", "Female", "Others", "Prefer not to say"], size=n
@@ -114,36 +113,16 @@ def load_data():
                 "Search_Method": np.random.choice(
                     ["Keyword", "Categories", "Filter", "Others"], size=n
                 ),
-                "Exploration_Depth": np.random.choice(
-                    ["First page", "Multiple pages"], size=n
-                ),
-                "Appreciated_Feature": np.random.choice(
-                    [
-                        "Customer service",
-                        "User-friendly website/app interface",
-                        "Wide product selection",
-                        "Product recommendations",
-                    ],
-                    size=n,
-                ),
-                "Improvement_Area": np.random.choice(
-                    [
-                        "Scrolling option would be much better than going to next page",
-                        "Shipping speed and reliability",
-                        "Quality of product is very poor according to the big offers",
-                    ],
-                    size=n,
-                ),
             }
         )
 
     # Clean whitespace in column names
     df.columns = df.columns.astype(str).str.strip()
 
-    # STRICT FIX: Drop duplicate column names strictly
+    # Drop duplicate column names
     df = df.loc[:, ~df.columns.duplicated(keep="first")].copy()
 
-    # Smart Matching Dictionary
+    # Column Mapping
     col_map = {}
     for col in df.columns:
         c_lower = col.lower().replace(" ", "_").replace("-", "_")
@@ -152,61 +131,71 @@ def load_data():
         elif "gender" in c_lower and "Gender" not in col_map.values():
             col_map[col] = "Gender"
         elif (
-            ("freq" in c_lower or "cadence" in c_lower or "purchase" in c_lower)
-            and "Purchase_Frequency" not in col_map.values()
-        ):
+            "freq" in c_lower or "cadence" in c_lower or "purchase" in c_lower
+        ) and "Purchase_Frequency" not in col_map.values():
             col_map[col] = "Purchase_Frequency"
         elif (
-            ("satis" in c_lower or "rating" in c_lower)
-            and "Shopping_Satisfaction" not in col_map.values()
-        ):
+            "satis" in c_lower or "rating" in c_lower
+        ) and "Shopping_Satisfaction" not in col_map.values():
             col_map[col] = "Shopping_Satisfaction"
         elif (
-            ("abandon" in c_lower or "reason" in c_lower)
-            and "Abandonment_Reason" not in col_map.values()
-        ):
+            "abandon" in c_lower or "reason" in c_lower
+        ) and "Abandonment_Reason" not in col_map.values():
             col_map[col] = "Abandonment_Reason"
         elif (
-            ("search" in c_lower or "method" in c_lower)
-            and "Search_Method" not in col_map.values()
-        ):
+            "search" in c_lower or "method" in c_lower
+        ) and "Search_Method" not in col_map.values():
             col_map[col] = "Search_Method"
 
     df = df.rename(columns=col_map)
-
-    # Re-apply duplicate removal after rename
     df = df.loc[:, ~df.columns.duplicated(keep="first")].copy()
 
-    # Defaults
+    # Fill missing values instead of dropping rows to preserve all 800 records
+    df["age"] = pd.to_numeric(df["age"], errors="coerce")
+    if df["age"].isnull().sum() > 0:
+        df["age"] = df["age"].fillna(df["age"].median())
+
     defaults = {
-        "age": 25,
         "Gender": "Not Specified",
         "Purchase_Frequency": "Once a month",
         "Shopping_Satisfaction": 3,
         "Abandonment_Reason": "High shipping costs",
-        "Search_Method": "Keyword",
+        "Search_Method": "Others",
     }
-
     for c, val in defaults.items():
         if c not in df.columns:
             df[c] = val
-
-    # Convert age
-    df["age"] = pd.to_numeric(df["age"], errors="coerce")
-    df = df[(df["age"] >= 13) & (df["age"] <= 80)].copy()
-
-    # Clean Search_Method Unknown
-    df["Search_Method"] = df["Search_Method"].replace(
-        {"Unknown": "Others", np.nan: "Others"}
-    )
+        else:
+            df[c] = df[c].fillna(val)
 
     return df
 
 
 df_raw = load_data()
 
+# Dynamic Full Ranges
+min_age = int(df_raw["age"].min())
+max_age = int(df_raw["age"].max())
+all_genders = list(df_raw["Gender"].dropna().astype(str).unique())
+all_cadence = list(df_raw["Purchase_Frequency"].dropna().astype(str).unique())
+
+# Initialize Session State for Filters
+if "selected_genders" not in st.session_state:
+    st.session_state["selected_genders"] = all_genders
+if "selected_age_range" not in st.session_state:
+    st.session_state["selected_age_range"] = (min_age, max_age)
+if "selected_cadence" not in st.session_state:
+    st.session_state["selected_cadence"] = all_cadence
+
+
+def reset_filters():
+    st.session_state["selected_genders"] = all_genders
+    st.session_state["selected_age_range"] = (min_age, max_age)
+    st.session_state["selected_cadence"] = all_cadence
+
+
 # ==========================================
-# 3. SIDEBAR FILTERS
+# 3. SIDEBAR CONTROL PANEL
 # ==========================================
 with st.sidebar:
     st.image(
@@ -214,28 +203,27 @@ with st.sidebar:
         width=140,
     )
     st.title("Executive Control Panel")
+
+    st.button("🔄 Reset All Filters", on_click=reset_filters, type="primary")
     st.markdown("---")
 
-    all_genders = list(df_raw["Gender"].dropna().astype(str).unique())
     selected_gender = st.multiselect(
-        "👥 Filter Gender:", options=all_genders, default=all_genders
+        "👥 Filter Gender:",
+        options=all_genders,
+        key="selected_genders",
     )
-
-    min_age_val = int(df_raw["age"].min()) if not df_raw["age"].empty else 13
-    max_age_val = int(df_raw["age"].max()) if not df_raw["age"].empty else 70
 
     selected_age = st.slider(
         "🎂 Select Age Range:",
-        min_value=min_age_val,
-        max_value=max_age_val,
-        value=(min_age_val, max_age_val),
+        min_value=min_age,
+        max_value=max_age,
+        key="selected_age_range",
     )
 
-    all_cadence = list(
-        df_raw["Purchase_Frequency"].dropna().astype(str).unique()
-    )
     selected_cadence = st.multiselect(
-        "🛍️ Purchase Cadence:", options=all_cadence, default=all_cadence
+        "🛍️ Purchase Cadence:",
+        options=all_cadence,
+        key="selected_cadence",
     )
 
 # Filtering logic
@@ -245,7 +233,7 @@ cadence_mask = df_raw["Purchase_Frequency"].isin(selected_cadence)
 
 df_filtered = df_raw[gender_mask & age_mask & cadence_mask].copy()
 
-# GUARANTEE UNIQUE COLUMNS BEFORE PLOTLY EXPRESS
+# Ensure unique columns for Plotly Express compatibility
 df_filtered = df_filtered.loc[
     :, ~df_filtered.columns.duplicated(keep="first")
 ].copy()
@@ -255,7 +243,7 @@ if df_filtered.empty:
     st.stop()
 
 # ==========================================
-# 4. MAIN DASHBOARD UI
+# 4. DASHBOARD HEADER & KPIS
 # ==========================================
 st.title("🛒 eBay Customer Behavior & ML Insights Dashboard")
 st.caption("Executive Analytics Portal & Customer Segmentation")
@@ -267,11 +255,11 @@ def safe_mode(series):
     return m[0] if not m.empty else "N/A"
 
 
-# KPI Row
 k1, k2, k3, k4, k5 = st.columns(5)
+
 with k1:
     st.markdown(
-        f"""<div class="kpi-card"><div class="kpi-title">Total Buyers</div><div class="kpi-value">{len(df_filtered)}</div><div class="kpi-sub">Cohort Count</div></div>""",
+        f"""<div class="kpi-card"><div class="kpi-title">Total Buyers</div><div class="kpi-value">{len(df_filtered)} / {len(df_raw)}</div><div class="kpi-sub">Filtered / Total</div></div>""",
         unsafe_allow_html=True,
     )
 with k2:
@@ -283,7 +271,7 @@ with k2:
 with k3:
     top_ab = safe_mode(df_filtered["Abandonment_Reason"])
     st.markdown(
-        f"""<div class="kpi-card"><div class="kpi-title">Top Friction</div><div class="kpi-value" style="font-size:15px !important;">{top_ab}</div><div class="kpi-sub">Primary Reason</div></div>""",
+        f"""<div class="kpi-card"><div class="kpi-title">Top Friction</div><div class="kpi-value" style="font-size:14px !important;">{top_ab}</div><div class="kpi-sub">Primary Reason</div></div>""",
         unsafe_allow_html=True,
     )
 with k4:
@@ -301,7 +289,9 @@ with k5:
 
 st.markdown("---")
 
-# Tabs
+# ==========================================
+# 5. TABS & CHARTS
+# ==========================================
 tab1, tab2, tab3, tab4 = st.tabs(
     [
         "📊 Executive Overview",
@@ -314,7 +304,6 @@ tab1, tab2, tab3, tab4 = st.tabs(
 with tab1:
     c1, c2 = st.columns(2)
     with c1:
-        # Pass dedicated 2-column DataFrame to Plotly to prevent any ambient duplicate issues
         df_age = df_filtered[["age", "Gender"]].copy()
         fig_age = px.histogram(
             df_age,
@@ -324,6 +313,7 @@ with tab1:
             title="Age & Gender Breakdown",
         )
         st.plotly_chart(fig_age, use_container_width=True)
+
     with c2:
         cad_cnt = (
             df_filtered["Purchase_Frequency"]
@@ -359,6 +349,7 @@ with tab2:
         )
         fig_ab.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig_ab, use_container_width=True)
+
     with f2:
         srch_cnt = (
             df_filtered["Search_Method"]
