@@ -71,7 +71,7 @@ st.markdown(
 
 
 # ==========================================
-# 2. SAFE DATA LOADING & DYNAMIC COLUMN MAPPING
+# 2. SAFE DATA LOADING & DUPLICATE COLUMN CLEANUP
 # ==========================================
 @st.cache_data
 def load_data():
@@ -140,40 +140,60 @@ def load_data():
             }
         )
 
-    # Column name cleaning: Spaces ko remove/replace aur matching fix
+    # Clean whitespace in column names
     df.columns = df.columns.str.strip()
 
-    # Dynamic Column Name Mapper (Flexible matching for different CSV column headers)
-    column_mapper = {}
+    # FIX: Remove Duplicate Columns if CSV has duplicate names
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    # Smart Matching Dictionary (Matches original CSV column names safely)
+    col_map = {}
     for col in df.columns:
-        col_lower = col.lower().replace(" ", "_").replace("-", "_")
-        if "age" in col_lower:
-            column_mapper[col] = "age"
-        elif "gender" in col_lower:
-            column_mapper[col] = "Gender"
-        elif "frequency" in col_lower or "cadence" in col_lower:
-            column_mapper[col] = "Purchase_Frequency"
-        elif "satisfaction" in col_lower or "rating" in col_lower:
-            column_mapper[col] = "Shopping_Satisfaction"
-        elif "abandon" in col_lower or "reason" in col_lower:
-            column_mapper[col] = "Abandonment_Reason"
-        elif "search" in col_lower or "method" in col_lower:
-            column_mapper[col] = "Search_Method"
-        elif "depth" in col_lower or "exploration" in col_lower:
-            column_mapper[col] = "Exploration_Depth"
-        elif "feature" in col_lower or "appreciat" in col_lower:
-            column_mapper[col] = "Appreciated_Feature"
-        elif "improve" in col_lower or "area" in col_lower:
-            column_mapper[col] = "Improvement_Area"
-        elif "review" in col_lower:
-            column_mapper[col] = "Customer_Reviews_Importance"
-        elif "recommend" in col_lower:
-            column_mapper[col] = "Personalized_Recommendation_Rating"
+        c_lower = col.lower().replace(" ", "_").replace("-", "_")
+        if "age" in c_lower and "age" not in col_map.values():
+            col_map[col] = "age"
+        elif "gender" in c_lower and "Gender" not in col_map.values():
+            col_map[col] = "Gender"
+        elif (
+            ("freq" in c_lower or "cadence" in c_lower or "purchase" in c_lower)
+            and "Purchase_Frequency" not in col_map.values()
+        ):
+            col_map[col] = "Purchase_Frequency"
+        elif (
+            ("satis" in c_lower or "rating" in c_lower)
+            and "Shopping_Satisfaction" not in col_map.values()
+        ):
+            col_map[col] = "Shopping_Satisfaction"
+        elif (
+            ("abandon" in c_lower or "reason" in c_lower)
+            and "Abandonment_Reason" not in col_map.values()
+        ):
+            col_map[col] = "Abandonment_Reason"
+        elif (
+            ("search" in c_lower or "method" in c_lower)
+            and "Search_Method" not in col_map.values()
+        ):
+            col_map[col] = "Search_Method"
+        elif (
+            ("depth" in c_lower or "explore" in c_lower)
+            and "Exploration_Depth" not in col_map.values()
+        ):
+            col_map[col] = "Exploration_Depth"
+        elif (
+            ("feature" in c_lower or "apprec" in c_lower)
+            and "Appreciated_Feature" not in col_map.values()
+        ):
+            col_map[col] = "Appreciated_Feature"
+        elif (
+            ("improve" in c_lower or "area" in c_lower)
+            and "Improvement_Area" not in col_map.values()
+        ):
+            col_map[col] = "Improvement_Area"
 
-    df = df.rename(columns=column_mapper)
+    df = df.rename(columns=col_map)
 
-    # Required columns check with fallback values
-    required_defaults = {
+    # Ensure required columns exist
+    defaults = {
         "age": 25,
         "Gender": "Not Specified",
         "Purchase_Frequency": "Once a month",
@@ -181,31 +201,49 @@ def load_data():
         "Abandonment_Reason": "High shipping costs",
         "Search_Method": "Keyword",
         "Exploration_Depth": "First page",
-        "Appreciated_Feature": "User-friendly website/app interface",
+        "Appreciated_Feature": "User-friendly interface",
         "Improvement_Area": "User interface",
-        "Customer_Reviews_Importance": 3.0,
-        "Personalized_Recommendation_Rating": 3.0,
     }
 
-    for col, default_val in required_defaults.items():
-        if col not in df.columns:
-            df[col] = default_val
+    for c, val in defaults.items():
+        if c not in df.columns:
+            df[c] = val
 
-    # Data Cleanups
-    df["age"] = pd.to_numeric(df["age"], errors="coerce")
+    # Helper function to extract 1D Series safely
+    def get_series(dataframe, col_name):
+        res = dataframe[col_name]
+        if isinstance(res, pd.DataFrame):
+            res = res.iloc[:, 0]
+        return res
+
+    # Preprocessing
+    age_series = pd.to_numeric(get_series(df, "age"), errors="coerce")
+    df["age"] = age_series
     df = df[(df["age"] >= 13) & (df["age"] <= 80)].copy()
 
-    df["Appreciated_Feature"] = df["Appreciated_Feature"].replace(
+    app_feat = get_series(df, "Appreciated_Feature").replace(
         {"Unknown": "Not Specified", np.nan: "Not Specified"}
     )
-    df["Improvement_Area"] = df["Improvement_Area"].replace(
+    df["Appreciated_Feature"] = app_feat
+
+    imp_area = get_series(df, "Improvement_Area").replace(
         {"Unknown": "Not Specified", np.nan: "Not Specified"}
     )
+    df["Improvement_Area"] = imp_area
 
     return df
 
 
 df_raw = load_data()
+
+
+# Helper function to get safe unique list from Series
+def get_unique_list(df, col_name):
+    val = df[col_name]
+    if isinstance(val, pd.DataFrame):
+        val = val.iloc[:, 0]
+    return list(val.dropna().astype(str).unique())
+
 
 # ==========================================
 # 3. SIDEBAR FILTERS
@@ -218,13 +256,19 @@ with st.sidebar:
     st.title("Executive Control Panel")
     st.markdown("---")
 
-    all_genders = list(df_raw["Gender"].dropna().unique())
+    all_genders = get_unique_list(df_raw, "Gender")
     selected_gender = st.multiselect(
         "👥 Filter Gender:", options=all_genders, default=all_genders
     )
 
-    min_age_val = int(df_raw["age"].min()) if not df_raw.empty else 13
-    max_age_val = int(df_raw["age"].max()) if not df_raw.empty else 70
+    age_col = (
+        df_raw["age"].iloc[:, 0]
+        if isinstance(df_raw["age"], pd.DataFrame)
+        else df_raw["age"]
+    )
+    min_age_val = int(age_col.min()) if not age_col.empty else 13
+    max_age_val = int(age_col.max()) if not age_col.empty else 70
+
     selected_age = st.slider(
         "🎂 Select Age Range:",
         min_value=min_age_val,
@@ -232,31 +276,58 @@ with st.sidebar:
         value=(min_age_val, max_age_val),
     )
 
-    all_cadence = list(df_raw["Purchase_Frequency"].dropna().unique())
+    all_cadence = get_unique_list(df_raw, "Purchase_Frequency")
     selected_cadence = st.multiselect(
         "🛍️ Purchase Cadence:", options=all_cadence, default=all_cadence
     )
 
-df_filtered = df_raw[
-    (df_raw["Gender"].isin(selected_gender))
-    & (df_raw["age"].between(selected_age[0], selected_age[1]))
-    & (df_raw["Purchase_Frequency"].isin(selected_cadence))
-]
+# Filtering logic
+gender_mask = (
+    df_raw["Gender"].iloc[:, 0]
+    if isinstance(df_raw["Gender"], pd.DataFrame)
+    else df_raw["Gender"]
+).isin(selected_gender)
+age_mask = (
+    df_raw["age"].iloc[:, 0]
+    if isinstance(df_raw["age"], pd.DataFrame)
+    else df_raw["age"]
+).between(selected_age[0], selected_age[1])
+cadence_mask = (
+    df_raw["Purchase_Frequency"].iloc[:, 0]
+    if isinstance(df_raw["Purchase_Frequency"], pd.DataFrame)
+    else df_raw["Purchase_Frequency"]
+).isin(selected_cadence)
+
+df_filtered = df_raw[gender_mask & age_mask & cadence_mask].copy()
 
 if df_filtered.empty:
-    st.warning(
-        "⚠️ Selected filters ka koi data nahi mila. Sidebar filters reset karein."
-    )
+    st.warning("⚠️ No data available for selected filters.")
     st.stop()
 
 # ==========================================
-# 4. MAIN DASHBOARD
+# 4. MAIN DASHBOARD UI
 # ==========================================
 st.title("🛒 eBay Customer Behavior & ML Insights Dashboard")
-st.caption("Executive Analytics Portal & Machine Learning Customer Segmentation")
+st.caption("Executive Analytics Portal & Customer Segmentation")
 st.markdown(" ")
 
-# KPI Bar
+
+def safe_mode(df, col):
+    s = df[col]
+    if isinstance(s, pd.DataFrame):
+        s = s.iloc[:, 0]
+    m = s.mode()
+    return m[0] if not m.empty else "N/A"
+
+
+def safe_mean(df, col):
+    s = df[col]
+    if isinstance(s, pd.DataFrame):
+        s = s.iloc[:, 0]
+    return s.mean()
+
+
+# KPI Row
 k1, k2, k3, k4, k5 = st.columns(5)
 with k1:
     st.markdown(
@@ -264,25 +335,25 @@ with k1:
         unsafe_allow_html=True,
     )
 with k2:
-    avg_sat = round(df_filtered["Shopping_Satisfaction"].mean(), 2)
+    avg_sat = round(safe_mean(df_filtered, "Shopping_Satisfaction"), 2)
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Avg Satisfaction</div><div class="kpi-value">{avg_sat} / 5</div><div class="kpi-sub">Rating Score</div></div>""",
         unsafe_allow_html=True,
     )
 with k3:
-    top_ab = df_filtered["Abandonment_Reason"].mode()[0]
+    top_ab = safe_mode(df_filtered, "Abandonment_Reason")
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Top Friction</div><div class="kpi-value" style="font-size:15px !important;">{top_ab}</div><div class="kpi-sub">Primary Reason</div></div>""",
         unsafe_allow_html=True,
     )
 with k4:
-    avg_age = round(df_filtered["age"].mean(), 1)
+    avg_age = round(safe_mean(df_filtered, "age"), 1)
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Average Age</div><div class="kpi-value">{avg_age} Yrs</div><div class="kpi-sub">Filtered Group</div></div>""",
         unsafe_allow_html=True,
     )
 with k5:
-    top_srch = df_filtered["Search_Method"].mode()[0]
+    top_srch = safe_mode(df_filtered, "Search_Method")
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Top Search</div><div class="kpi-value">{top_srch}</div><div class="kpi-sub">Main Channel</div></div>""",
         unsafe_allow_html=True,
@@ -312,7 +383,12 @@ with tab1:
         )
         st.plotly_chart(fig_age, use_container_width=True)
     with c2:
-        cad_cnt = df_filtered["Purchase_Frequency"].value_counts().reset_index()
+        pf = (
+            df_filtered["Purchase_Frequency"].iloc[:, 0]
+            if isinstance(df_filtered["Purchase_Frequency"], pd.DataFrame)
+            else df_filtered["Purchase_Frequency"]
+        )
+        cad_cnt = pf.value_counts().reset_index()
         cad_cnt.columns = ["Cadence", "Count"]
         fig_cad = px.pie(
             cad_cnt, names="Cadence", values="Count", title="Purchase Cadence"
@@ -322,9 +398,12 @@ with tab1:
 with tab2:
     f1, f2 = st.columns(2)
     with f1:
-        ab_cnt = (
-            df_filtered["Abandonment_Reason"].value_counts().reset_index()
+        ab = (
+            df_filtered["Abandonment_Reason"].iloc[:, 0]
+            if isinstance(df_filtered["Abandonment_Reason"], pd.DataFrame)
+            else df_filtered["Abandonment_Reason"]
         )
+        ab_cnt = ab.value_counts().reset_index()
         ab_cnt.columns = ["Reason", "Count"]
         fig_ab = px.bar(
             ab_cnt,
@@ -337,7 +416,12 @@ with tab2:
         fig_ab.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig_ab, use_container_width=True)
     with f2:
-        srch_cnt = df_filtered["Search_Method"].value_counts().reset_index()
+        sm = (
+            df_filtered["Search_Method"].iloc[:, 0]
+            if isinstance(df_filtered["Search_Method"], pd.DataFrame)
+            else df_filtered["Search_Method"]
+        )
+        srch_cnt = sm.value_counts().reset_index()
         srch_cnt.columns = ["Method", "Count"]
         fig_srch = px.bar(
             srch_cnt,
