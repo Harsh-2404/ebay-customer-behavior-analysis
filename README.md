@@ -92,7 +92,8 @@ Using `LabelEncoder` and `StandardScaler` on behavioral variables (`age`, `Purch
 
 ```text
 ├── README.md                                         # Comprehensive Project Documentation
-├── eBay.csv                                          # Raw Survey Dataset (800 rows, 24 attributes)
+├── eBay.csv                                         # Raw Survey Dataset (800 rows, 24 attributes)
+├── cleaned.eBay.csv                                  # Cleaned Dataset
 ├── eBay_Customer_Purchasing_Behavior_Analysis.ipynb  # Complete Exploratory & Predictive Data Analysis
 ├── eBay_Customer_Purchasing_Behavior_Analysis.pdf    # Official PDF Report (Visual Insights & Executive Brief)
 └── eBay Project Summary Report.docx                  # Official Business & Technical Summary
