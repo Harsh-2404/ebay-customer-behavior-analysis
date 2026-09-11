@@ -84,7 +84,7 @@ def load_data():
         df = pd.DataFrame(
             {
                 "age": np.random.choice(
-                    [3, 6, 10, 18, 22, 28, 35, 42, 50, 61, 67], size=n
+                    [18, 22, 28, 35, 42, 50, 61, 67], size=n
                 ),
                 "Gender": np.random.choice(
                     ["Male", "Female", "Others", "Prefer not to say"], size=n
@@ -134,18 +134,14 @@ def load_data():
                     ],
                     size=n,
                 ),
-                "Customer_Reviews_Importance": np.random.uniform(1, 5, size=n),
-                "Personalized_Recommendation_Rating": np.random.uniform(
-                    1, 5, size=n
-                ),
             }
         )
 
     # Clean whitespace in column names
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.astype(str).str.strip()
 
-    # FIX: Remove Duplicate Columns if CSV has duplicate names
-    df = df.loc[:, ~df.columns.duplicated()].copy()
+    # STRICT FIX: Drop duplicate column names strictly
+    df = df.loc[:, ~df.columns.duplicated(keep="first")].copy()
 
     # Smart Matching Dictionary
     col_map = {}
@@ -175,25 +171,13 @@ def load_data():
             and "Search_Method" not in col_map.values()
         ):
             col_map[col] = "Search_Method"
-        elif (
-            ("depth" in c_lower or "explore" in c_lower)
-            and "Exploration_Depth" not in col_map.values()
-        ):
-            col_map[col] = "Exploration_Depth"
-        elif (
-            ("feature" in c_lower or "apprec" in c_lower)
-            and "Appreciated_Feature" not in col_map.values()
-        ):
-            col_map[col] = "Appreciated_Feature"
-        elif (
-            ("improve" in c_lower or "area" in c_lower)
-            and "Improvement_Area" not in col_map.values()
-        ):
-            col_map[col] = "Improvement_Area"
 
     df = df.rename(columns=col_map)
 
-    # Ensure required columns exist
+    # Re-apply duplicate removal after rename
+    df = df.loc[:, ~df.columns.duplicated(keep="first")].copy()
+
+    # Defaults
     defaults = {
         "age": 25,
         "Gender": "Not Specified",
@@ -201,55 +185,25 @@ def load_data():
         "Shopping_Satisfaction": 3,
         "Abandonment_Reason": "High shipping costs",
         "Search_Method": "Keyword",
-        "Exploration_Depth": "First page",
-        "Appreciated_Feature": "User-friendly interface",
-        "Improvement_Area": "User interface",
     }
 
     for c, val in defaults.items():
         if c not in df.columns:
             df[c] = val
 
-    # Helper function to extract 1D Series safely
-    def get_series(dataframe, col_name):
-        res = dataframe[col_name]
-        if isinstance(res, pd.DataFrame):
-            res = res.iloc[:, 0]
-        return res
-
-    # Preprocessing
-    age_series = pd.to_numeric(get_series(df, "age"), errors="coerce")
-    df["age"] = age_series
+    # Convert age
+    df["age"] = pd.to_numeric(df["age"], errors="coerce")
     df = df[(df["age"] >= 13) & (df["age"] <= 80)].copy()
 
-    app_feat = get_series(df, "Appreciated_Feature").replace(
-        {"Unknown": "Not Specified", np.nan: "Not Specified"}
-    )
-    df["Appreciated_Feature"] = app_feat
-
-    imp_area = get_series(df, "Improvement_Area").replace(
-        {"Unknown": "Not Specified", np.nan: "Not Specified"}
-    )
-    df["Improvement_Area"] = imp_area
-
-    srch_method = get_series(df, "Search_Method").replace(
+    # Clean Search_Method Unknown
+    df["Search_Method"] = df["Search_Method"].replace(
         {"Unknown": "Others", np.nan: "Others"}
     )
-    df["Search_Method"] = srch_method
 
     return df
 
 
 df_raw = load_data()
-
-
-# Helper function to get safe unique list from Series
-def get_unique_list(df, col_name):
-    val = df[col_name]
-    if isinstance(val, pd.DataFrame):
-        val = val.iloc[:, 0]
-    return list(val.dropna().astype(str).unique())
-
 
 # ==========================================
 # 3. SIDEBAR FILTERS
@@ -262,18 +216,13 @@ with st.sidebar:
     st.title("Executive Control Panel")
     st.markdown("---")
 
-    all_genders = get_unique_list(df_raw, "Gender")
+    all_genders = list(df_raw["Gender"].dropna().astype(str).unique())
     selected_gender = st.multiselect(
         "👥 Filter Gender:", options=all_genders, default=all_genders
     )
 
-    age_col = (
-        df_raw["age"].iloc[:, 0]
-        if isinstance(df_raw["age"], pd.DataFrame)
-        else df_raw["age"]
-    )
-    min_age_val = int(age_col.min()) if not age_col.empty else 13
-    max_age_val = int(age_col.max()) if not age_col.empty else 70
+    min_age_val = int(df_raw["age"].min()) if not df_raw["age"].empty else 13
+    max_age_val = int(df_raw["age"].max()) if not df_raw["age"].empty else 70
 
     selected_age = st.slider(
         "🎂 Select Age Range:",
@@ -282,29 +231,24 @@ with st.sidebar:
         value=(min_age_val, max_age_val),
     )
 
-    all_cadence = get_unique_list(df_raw, "Purchase_Frequency")
+    all_cadence = list(
+        df_raw["Purchase_Frequency"].dropna().astype(str).unique()
+    )
     selected_cadence = st.multiselect(
         "🛍️ Purchase Cadence:", options=all_cadence, default=all_cadence
     )
 
 # Filtering logic
-gender_mask = (
-    df_raw["Gender"].iloc[:, 0]
-    if isinstance(df_raw["Gender"], pd.DataFrame)
-    else df_raw["Gender"]
-).isin(selected_gender)
-age_mask = (
-    df_raw["age"].iloc[:, 0]
-    if isinstance(df_raw["age"], pd.DataFrame)
-    else df_raw["age"]
-).between(selected_age[0], selected_age[1])
-cadence_mask = (
-    df_raw["Purchase_Frequency"].iloc[:, 0]
-    if isinstance(df_raw["Purchase_Frequency"], pd.DataFrame)
-    else df_raw["Purchase_Frequency"]
-).isin(selected_cadence)
+gender_mask = df_raw["Gender"].isin(selected_gender)
+age_mask = df_raw["age"].between(selected_age[0], selected_age[1])
+cadence_mask = df_raw["Purchase_Frequency"].isin(selected_cadence)
 
 df_filtered = df_raw[gender_mask & age_mask & cadence_mask].copy()
+
+# GUARANTEE UNIQUE COLUMNS BEFORE PLOTLY EXPRESS
+df_filtered = df_filtered.loc[
+    :, ~df_filtered.columns.duplicated(keep="first")
+].copy()
 
 if df_filtered.empty:
     st.warning("⚠️ No data available for selected filters.")
@@ -318,19 +262,9 @@ st.caption("Executive Analytics Portal & Customer Segmentation")
 st.markdown(" ")
 
 
-def safe_mode(df, col):
-    s = df[col]
-    if isinstance(s, pd.DataFrame):
-        s = s.iloc[:, 0]
-    m = s.mode()
+def safe_mode(series):
+    m = series.mode()
     return m[0] if not m.empty else "N/A"
-
-
-def safe_mean(df, col):
-    s = df[col]
-    if isinstance(s, pd.DataFrame):
-        s = s.iloc[:, 0]
-    return s.mean()
 
 
 # KPI Row
@@ -341,25 +275,25 @@ with k1:
         unsafe_allow_html=True,
     )
 with k2:
-    avg_sat = round(safe_mean(df_filtered, "Shopping_Satisfaction"), 2)
+    avg_sat = round(df_filtered["Shopping_Satisfaction"].mean(), 2)
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Avg Satisfaction</div><div class="kpi-value">{avg_sat} / 5</div><div class="kpi-sub">Rating Score</div></div>""",
         unsafe_allow_html=True,
     )
 with k3:
-    top_ab = safe_mode(df_filtered, "Abandonment_Reason")
+    top_ab = safe_mode(df_filtered["Abandonment_Reason"])
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Top Friction</div><div class="kpi-value" style="font-size:15px !important;">{top_ab}</div><div class="kpi-sub">Primary Reason</div></div>""",
         unsafe_allow_html=True,
     )
 with k4:
-    avg_age = round(safe_mean(df_filtered, "age"), 1)
+    avg_age = round(df_filtered["age"].mean(), 1)
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Average Age</div><div class="kpi-value">{avg_age} Yrs</div><div class="kpi-sub">Filtered Group</div></div>""",
         unsafe_allow_html=True,
     )
 with k5:
-    top_srch = safe_mode(df_filtered, "Search_Method")
+    top_srch = safe_mode(df_filtered["Search_Method"])
     st.markdown(
         f"""<div class="kpi-card"><div class="kpi-title">Top Search</div><div class="kpi-value">{top_srch}</div><div class="kpi-sub">Main Channel</div></div>""",
         unsafe_allow_html=True,
@@ -380,8 +314,10 @@ tab1, tab2, tab3, tab4 = st.tabs(
 with tab1:
     c1, c2 = st.columns(2)
     with c1:
+        # Pass dedicated 2-column DataFrame to Plotly to prevent any ambient duplicate issues
+        df_age = df_filtered[["age", "Gender"]].copy()
         fig_age = px.histogram(
-            df_filtered,
+            df_age,
             x="age",
             color="Gender",
             barmode="group",
@@ -389,13 +325,14 @@ with tab1:
         )
         st.plotly_chart(fig_age, use_container_width=True)
     with c2:
-        pf = (
-            df_filtered["Purchase_Frequency"].iloc[:, 0]
-            if isinstance(df_filtered["Purchase_Frequency"], pd.DataFrame)
-            else df_filtered["Purchase_Frequency"]
+        cad_cnt = (
+            df_filtered["Purchase_Frequency"]
+            .value_counts()
+            .reset_index()
+            .rename(columns={"index": "Cadence", "Purchase_Frequency": "Count"})
         )
-        cad_cnt = pf.value_counts().reset_index()
-        cad_cnt.columns = ["Cadence", "Count"]
+        if "Cadence" not in cad_cnt.columns:
+            cad_cnt.columns = ["Cadence", "Count"]
         fig_cad = px.pie(
             cad_cnt, names="Cadence", values="Count", title="Purchase Cadence"
         )
@@ -404,13 +341,14 @@ with tab1:
 with tab2:
     f1, f2 = st.columns(2)
     with f1:
-        ab = (
-            df_filtered["Abandonment_Reason"].iloc[:, 0]
-            if isinstance(df_filtered["Abandonment_Reason"], pd.DataFrame)
-            else df_filtered["Abandonment_Reason"]
+        ab_cnt = (
+            df_filtered["Abandonment_Reason"]
+            .value_counts()
+            .reset_index()
+            .rename(columns={"index": "Reason", "Abandonment_Reason": "Count"})
         )
-        ab_cnt = ab.value_counts().reset_index()
-        ab_cnt.columns = ["Reason", "Count"]
+        if "Reason" not in ab_cnt.columns:
+            ab_cnt.columns = ["Reason", "Count"]
         fig_ab = px.bar(
             ab_cnt,
             y="Reason",
@@ -422,13 +360,14 @@ with tab2:
         fig_ab.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig_ab, use_container_width=True)
     with f2:
-        sm = (
-            df_filtered["Search_Method"].iloc[:, 0]
-            if isinstance(df_filtered["Search_Method"], pd.DataFrame)
-            else df_filtered["Search_Method"]
+        srch_cnt = (
+            df_filtered["Search_Method"]
+            .value_counts()
+            .reset_index()
+            .rename(columns={"index": "Method", "Search_Method": "Count"})
         )
-        srch_cnt = sm.value_counts().reset_index()
-        srch_cnt.columns = ["Method", "Count"]
+        if "Method" not in srch_cnt.columns:
+            srch_cnt.columns = ["Method", "Count"]
         fig_srch = px.bar(
             srch_cnt,
             x="Method",
@@ -440,14 +379,19 @@ with tab2:
         st.plotly_chart(fig_srch, use_container_width=True)
 
 with tab3:
-    num_cols = ["age", "Shopping_Satisfaction"]
-    X = df_filtered[num_cols].dropna()
+    X = df_filtered[["age", "Shopping_Satisfaction"]].dropna()
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(X_scaled)
-    df_clustered = df_filtered.loc[X.index].copy()
-    df_clustered["Cluster"] = [f"Cluster {c+1}" for c in clusters]
+
+    df_clustered = pd.DataFrame(
+        {
+            "age": X["age"].values,
+            "Shopping_Satisfaction": X["Shopping_Satisfaction"].values,
+            "Cluster": [f"Cluster {c+1}" for c in clusters],
+        }
+    )
 
     fig_cluster = px.scatter(
         df_clustered,
