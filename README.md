@@ -5,6 +5,10 @@
 [![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-Machine%20Learning-F7931E.svg)](https://scikit-learn.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ebay-customer-behavior-analysis-harsh.streamlit.app/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/Harsh-2404/ebay-customer-behavior-analysis/blob/main/eBay_Customer_Purchasing_Behavior_Analysis.ipynb)
+
+
 ---
 
 ## 📌 Project Overview
